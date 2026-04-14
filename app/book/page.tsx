@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { supabase } from "@/lib/supabase";
+import { createMeeting } from "@/lib/meetings";
 import { MeetingPriority, MeetingRole } from "@/lib/types";
 
 const roles: MeetingRole[] = ["Client", "Internal Team", "Interview"];
@@ -36,21 +36,21 @@ export default function BookPage() {
     setIsSubmitting(true);
     setMessage("");
 
-    const { error } = await supabase.from("meetings").insert({
-      name: name.trim(),
-      role,
-      reason: reason.trim(),
-      priority,
-      status: "pending",
-      scheduled_time: new Date(scheduledTime).toISOString()
-    });
-
-    setIsSubmitting(false);
-    if (error) {
-      setMessage(error.message);
+    try {
+      await createMeeting({
+        name,
+        role,
+        reason,
+        priority,
+        scheduledTime
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to submit booking.");
+      setIsSubmitting(false);
       return;
     }
 
+    setIsSubmitting(false);
     setName("");
     setRole("Client");
     setReason("");
