@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { fetchMeetings, subscribeToMeetings } from "@/lib/meetings";
 import { supabase } from "@/lib/supabase";
 import { Meeting } from "@/lib/types";
 
@@ -14,32 +15,30 @@ function formatDate(value?: string) {
 export default function DisplayPage() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  const fetchMeetings = useCallback(async () => {
-    const { data } = await supabase
-      .from("meetings")
-      .select("*")
-      .order("scheduled_time", { ascending: true });
-
-    if (data) setMeetings(data as Meeting[]);
-    setLoading(false);
+  const loadMeetings = useCallback(async () => {
+    try {
+      const data = await fetchMeetings();
+      setMeetings(data);
+      setUpdatedAt(new Date());
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch meetings.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    void fetchMeetings();
-    const channel = supabase
-      .channel("meetings-display")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "meetings" },
-        () => void fetchMeetings()
-      )
-      .subscribe();
+    void loadMeetings();
+    const channel = subscribeToMeetings("meetings-display", () => void loadMeetings());
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [fetchMeetings]);
+  }, [loadMeetings]);
 
   const currentMeeting = useMemo(
     () => meetings.find((m) => m.status === "in_progress") ?? null,
@@ -61,6 +60,8 @@ export default function DisplayPage() {
           <CardContent className="space-y-4">
             {loading ? (
               <p className="text-slate-300">Loading...</p>
+            ) : error ? (
+              <p className="text-red-300">{error}</p>
             ) : currentMeeting ? (
               <>
                 <p className="text-4xl font-semibold">{currentMeeting.name}</p>
@@ -81,6 +82,9 @@ export default function DisplayPage() {
             <CardTitle className="text-xl">Queue</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="text-xs text-slate-400">
+              Last updated: {updatedAt ? updatedAt.toLocaleTimeString() : "-"}
+            </div>
             <div>
               <p className="text-sm text-slate-400">Waiting Count</p>
               <p className="text-4xl font-semibold text-yellow-300">{waitingQueue.length}</p>

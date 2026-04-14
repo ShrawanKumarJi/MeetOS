@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { MeetingCard } from "@/components/meeting-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { fetchMeetings, subscribeToMeetings, updateMeetingStatus } from "@/lib/meetings";
 import { supabase } from "@/lib/supabase";
 import { Meeting, MeetingStatus } from "@/lib/types";
 
@@ -14,36 +15,38 @@ export default function DashboardPage() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
-  const fetchMeetings = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("meetings")
-      .select("*")
-      .order("scheduled_time", { ascending: true });
-
-    if (!error && data) setMeetings(data as Meeting[]);
-    setLoading(false);
+  const loadMeetings = useCallback(async () => {
+    try {
+      const data = await fetchMeetings();
+      setMeetings(data);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch meetings.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    void fetchMeetings();
-    const channel = supabase
-      .channel("meetings-dashboard")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "meetings" },
-        () => void fetchMeetings()
-      )
-      .subscribe();
+    void loadMeetings();
+    const channel = subscribeToMeetings("meetings-dashboard", () => void loadMeetings());
 
     return () => {
+      // Remove channel on unmount to avoid duplicate subscriptions.
       void supabase.removeChannel(channel);
     };
-  }, [fetchMeetings]);
+  }, [loadMeetings]);
 
   async function updateStatus(id: string, status: MeetingStatus) {
     setUpdatingId(id);
-    await supabase.from("meetings").update({ status }).eq("id", id);
+    try {
+      await updateMeetingStatus(id, status);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update meeting status.");
+    }
     setUpdatingId(null);
   }
 
@@ -67,6 +70,7 @@ export default function DashboardPage() {
       </div>
 
       {loading ? <p className="text-sm text-slate-500">Loading meetings...</p> : null}
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
         {sections.map((section) => (
